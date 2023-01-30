@@ -5,8 +5,10 @@ channels:
 dependencies:
   - python=3.8.*
   - dask=2023.1.*
-  - pandas=1.5.*
+  - geopandas=0.12.*
   - pip=22.3.*
   - matplotlib=3.6.*
+  - ipywidgets=7.*
+  - seaborn=0.*
   - pip:
     - sodapy==2.2.0
