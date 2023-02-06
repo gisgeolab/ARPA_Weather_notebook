@@ -26,7 +26,9 @@ def order_dates(df):
 
 def connect_ARPA_api(token: str) -> Socrata:
     """
-    Function to connect to ARPA API.
+    Function to connect to ARPA API. Unauthenticated client only works with public data sets, and there is a limit for the requests.
+    Note 'None' in place of application token, and no username or password.
+    To get all the available data from the API the authentication is required.
 
     Parameters:
         token (str): the ARPA token obtained from Open Data Lombardia website
@@ -46,7 +48,7 @@ def connect_ARPA_api(token: str) -> Socrata:
 
 "---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
-def ARPA_sensors_info(sensors_info: dict) -> pd.DataFrame:
+def ARPA_sensors_info(client) -> pd.DataFrame:
     """
     Functions to convert sensors information to Pandas dataframe and fix the data types.
 
@@ -56,6 +58,10 @@ def ARPA_sensors_info(sensors_info: dict) -> pd.DataFrame:
     Returns:
         df: dataframe containing ARPA sensors information
     """
+    
+    stationsId = "nf78-nj6b" # Select meteo stations dataset containing positions and information about sensors
+    sensors_info = client.get_all(stationsId)
+
     sensors_df = pd.DataFrame(sensors_info)
     sensors_df["idsensore"] = sensors_df["idsensore"].astype("int32")
     sensors_df["tipologia"] = sensors_df["tipologia"].astype("category")
@@ -71,13 +77,13 @@ def ARPA_sensors_info(sensors_info: dict) -> pd.DataFrame:
 
 "---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
-def check_dates(start_date, end_date):
+def check_dates(start_datetime, end_datetime):
     """
     Check that the start and end dates are in the same year.
     
     Parameters:
-        start_date (str): The start date in the format "YYYY-MM-DD".
-        end_date (str): The end date in the format "YYYY-MM-DD".
+        start_date (datetime): The start date in the format "YYYY-MM-DD".
+        end_date (datetime): The end date in the format "YYYY-MM-DD".
     
     Returns:
         year (int): The year of the start and end dates.
@@ -87,16 +93,14 @@ def check_dates(start_date, end_date):
     Raises:
         Exception: If the start and end dates are not in the same year.
     """
-    
-    # Convert the start and end dates from strings to datetime objects
-    start_datetime = datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S")
-    end_datetime = datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S")
 
     # Check that the start and end dates are in the same year
     if start_datetime.year != end_datetime.year:
         raise Exception("Dates must be in the same year! Years chosen are: {year_start} and {year_end}".format(
             year_start=start_datetime.year, year_end=end_datetime.year
         ))
+    elif start_datetime > end_datetime:
+        raise Exception("Start date bust be before end date")
 
     # Get the year of the start and end dates
     year = start_datetime.year
@@ -121,7 +125,7 @@ def req_ARPA_start_end_date_API(client):
     #Weather sensors dataset id on Open Data Lombardia
     weather_sensor_id = "647i-nhxk"
     
-    #Query
+    #Query min and max dates
     query = """ select MAX(data), MIN(data) limit 9999999999999999"""
 
     #Get max and min dates from the list
@@ -131,7 +135,7 @@ def req_ARPA_start_end_date_API(client):
     start_API_date = min_max_dates['MIN_data']
     end_API_date = min_max_dates['MAX_data']
     
-    #Convert to datetime and add 1 day to end date to consider all the values inside the last day (e.g. 20/01/2023 23:10:00 won't be considered and the requested data will be untile 20/01/2023 00:00:00)
+    #Convert to datetime
     start_API_date = datetime.strptime(start_API_date, "%Y-%m-%dT%H:%M:%S.%f")
     end_API_date = datetime.strptime(end_API_date, "%Y-%m-%dT%H:%M:%S.%f")
     
@@ -181,7 +185,9 @@ def req_ARPA_data_API(client, start_date, end_date, sensors_list):
     print("Time used for requesting the data from ARPA API: ", elapsed)
     
     #Create dataframe
-    df = pd.DataFrame(time_series, columns=['idsensore','data','valore'])
+    df = pd.DataFrame(time_series, columns=['idsensore','data','valore','stato'])
+    df = df[df.stato.isin(["VA", "VV"])]  #keep only validated data identified by stato equal to VA and VV
+    df = df.drop(['stato'], axis=1)
     
     #Convert types
     df['valore'] = df['valore'].astype('float32')
@@ -190,7 +196,10 @@ def req_ARPA_data_API(client, start_date, end_date, sensors_list):
     df = df.sort_values(by='data', ascending=True).reset_index(drop=True)
     
     #Filter with selected sensors list
-    df = df[df['value'] != -9999]
+    try:
+        df = df[df['value'] != -9999]
+    except:
+        df = df[df['valore'] != -9999]
     df = df[df['idsensore'].isin(sensors_list)]
 
     return df
@@ -212,6 +221,7 @@ def download_extract_csv_from_year(year):
     
     #Create a dict with years and link to the zip folder on Open Data Lombardia - REQUIRES TO BE UPDATED EVERY YEAR
     switcher = {
+        '2023': "https://www.dati.lombardia.it/download/48xr-g9b9/application%2Fzip",
         '2022': "https://www.dati.lombardia.it/download/mvvc-nmzv/application%2Fzip",
         '2021': "https://www.dati.lombardia.it/download/49n9-866s/application%2Fzip",
         '2020': "https://www.dati.lombardia.it/download/erjn-istm/application%2Fzip",
@@ -286,22 +296,25 @@ def process_ARPA_csv(csv_file, start_date, end_date, sensors_list):
     print(("The time range used for the processing is {start_date} to {end_date}").format(start_date=start_date,end_date=end_date))
     
     #Read csv file with Dask dataframe
-    df = dd.read_csv(csv_file, usecols=['IdSensore','Data','Valore']) 
+    df = dd.read_csv(csv_file, usecols=['IdSensore','Data','Valore', 'Stato']) 
     
     #Make csv columns names equal to API columns names
-    df = df.rename(columns={'IdSensore': 'idsensore', 'Data': 'data', 'Valore': 'valore'})
+    df = df.rename(columns={'IdSensore': 'idsensore', 'Data': 'data', 'Valore': 'valore', 'Stato':'stato'})
     
     #Type formatting
     df['valore'] = df['valore'].astype('float32')
     df['idsensore'] = df['idsensore'].astype('int32')
     df['data'] = dd.to_datetime(df.data, format='%d/%m/%Y %H:%M:%S')
+    df['stato'] = df['stato'].astype(str)
     
     #Filter using the dates
     df = df[df['valore'] != -9999]
     df = df.loc[(df['data'] >= start_date) & (df['data'] <= end_date)]
     #Filter on temperature sensors list
     sensors_list = list(map(int, sensors_list))
-    df = df[df['idsensore'].isin(sensors_list)]
+    df = df[df['idsensore'].isin(sensors_list)] #keep only sensors in the list (for example providing a list of temperature sensors, will keep only those)
+    df = df[df.stato.isin(["VA", "VV"])] #keep only validated data identified by stato equal to VA and VV
+    df = df.drop(['stato'], axis=1)
     
     #Order dates
     df = df.sort_values(by='data', ascending=True).reset_index(drop=True)
@@ -365,51 +378,46 @@ def outlier_filter_zscore(df, sensors_list, threshold=3):
 
 "---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
-def aggregate_group_data(df, temporal_agg="D", agg="mean"):
+def aggregate_group_data(df, temporal_agg="D"):
     """
     Aggregates ARPA data with providing a temporal aggregation (day, week etc.) and a statistical aggregration function (mean, max, min etc.). The dataframe is grouped by sensor id (idsensore).
 
             Parameters:
                 df(dataframe): ARPA dataframe containing the following columns: "idsensore"(int), "data"(datetime) and "valore"(float)
                 temporal_agg(str): the temporal aggregation accepted by the resample() method (D, M, Y or others)
-                agg(str): the statistical aggregation to be performed (mean, max, min etc.)
 
             Returns:
                 df(dataframe): computed filtered and aggregated dask dataframe
     """
     
     print("Number of sensors available in the dataframe: ", len(df.idsensore.unique()))
-    print("Aggregation function: " + agg)
     print("Temporal aggregation: " + temporal_agg)
     df = df.set_index('data')
           
-    grouped = df.groupby('idsensore').resample(str(temporal_agg))['valore'].agg(agg)
+    grouped = df.groupby('idsensore').resample(str(temporal_agg))['valore'].agg(['mean', 'max', 'min', 'std', 'count'])
     grouped = grouped.reset_index()
     
     return grouped
 
 "---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
 
-def aggregate_group_data(df, temporal_agg="D", agg="mean"):
+def aggregate_group_data_wind_dir(df, temporal_agg="D"):
     """
-    Aggregates ARPA data with providing a temporal aggregation (day, week etc.) and a statistical aggregration function (mean, max, min etc.). The dataframe is grouped by sensor id (idsensore).
+    Aggregates Wind Direction ARPA data with providing a temporal aggregation (day, week etc.) and a statistical aggregration function (mode, count). The dataframe is grouped by sensor id (idsensore).
 
             Parameters:
                 df(dataframe): ARPA dataframe containing the following columns: "idsensore"(int), "data"(datetime) and "valore"(float)
                 temporal_agg(str): the temporal aggregation accepted by the resample() method (D, M, Y or others)
-                agg(str): the statistical aggregation to be performed (mean, max, min etc.)
 
             Returns:
                 df(dataframe): computed filtered and aggregated dask dataframe
     """
     
     print("Number of sensors available in the dataframe: ", len(df.idsensore.unique()))
-    print("Aggregation function: " + agg)
     print("Temporal aggregation: " + temporal_agg)
     df = df.set_index('data')
           
-    grouped = df.groupby('idsensore').resample(str(temporal_agg))['valore'].agg([agg, 'count'])
-    grouped = grouped.rename(columns={agg: 'valore'})
+    grouped = df.groupby('idsensore').resample(str(temporal_agg))['valore'].agg([lambda x: pd.Series.mode(x)[0], 'count']).rename({'<lambda_0>': 'mode'}, axis=1)
     grouped = grouped.reset_index()
     
     return grouped
