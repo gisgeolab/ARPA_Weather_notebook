@@ -227,7 +227,11 @@ def download_extract_csv_from_year(year):
         '2020': "https://www.dati.lombardia.it/download/erjn-istm/application%2Fzip",
         '2019': "https://www.dati.lombardia.it/download/wrhf-6ztd/application%2Fzip",
         '2018': "https://www.dati.lombardia.it/download/sfbe-yqe8/application%2Fzip",
-        '2017': "https://www.dati.lombardia.it/download/vx6g-atiu/application%2Fzip"
+        '2017': "https://www.dati.lombardia.it/download/vx6g-atiu/application%2Fzip",
+        '2016': "https://www.dati.lombardia.it/download/kgxu-frcw/application%2Fzip",
+        '2015': "https://www.dati.lombardia.it/download/knr4-9ujq/application%2Fzip",
+        '2014': "https://www.dati.lombardia.it/download/fn7i-6whe/application%2Fzip",
+        '2013': "https://www.dati.lombardia.it/download/76wm-spny/application%2Fzip",
     }
     
     #Select the url and make request
