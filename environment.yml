@@ -10,6 +10,7 @@ dependencies:
   - dask=2023.3.*
   - ipywidgets=8.0.*
   - seaborn=0.12.*
+  - plotly=5.9.*
   - pip=22.3.*
   - pip:
     - sodapy==2.2.0
