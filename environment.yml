@@ -9,6 +9,7 @@ dependencies:
   - pandas= 1.5.3
   - dask=2023.3.*
   - ipywidgets=8.0.*
+  - seaborn=0.12.*
   - pip=22.3.*
   - pip:
     - sodapy==2.2.0
