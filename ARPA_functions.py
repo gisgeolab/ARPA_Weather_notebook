@@ -196,10 +196,7 @@ def req_ARPA_data_API(client, start_date, end_date, sensors_list):
     df = df.sort_values(by='data', ascending=True).reset_index(drop=True)
     
     #Filter with selected sensors list
-    try:
-        df = df[df['value'] != -9999]
-    except:
-        df = df[df['valore'] != -9999]
+    df = df[df['valore'] != -9999]
     df = df[df['idsensore'].isin(sensors_list)]
 
     return df
